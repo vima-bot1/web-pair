@@ -1,37 +1,42 @@
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys")
+const express = require("express")
 
-import express from "express";
-import bodyParser from "body-parser";
-import { fileURLToPath } from "url";
-import path from "path";
+const app = express()
+app.use(express.json())
 
-import pairRouter from "./pair.js";
-import qrRouter from "./qr.js";
+let sock, latestQR = ""
 
-const app = express();
+async function startSock() {
+  const { state, saveCreds } = await useMultiFileAuthState("auth")
+  const { version } = await fetchLatestBaileysVersion()
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+  sock = makeWASocket({
+    auth: state,
+    version,
+    browser: ["VIMA MD", "Chrome", "1.0"]
+  })
 
-const PORT = process.env.PORT || 8000;
+  sock.ev.on("creds.update", saveCreds)
 
-import("events").then((events) => {
-    events.EventEmitter.defaultMaxListeners = 500;
-});
+  sock.ev.on("connection.update", ({ qr, connection }) => {
+    if (qr) latestQR = qr
+    if (connection === "open") console.log("✅ Connected")
+  })
+}
 
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(express.static(__dirname));
+startSock()
 
-app.get("/", (req, res) => {
-    res.sendFile(path.join(__dirname, "pair.html"));
-});
+app.post("/pair", async (req, res) => {
+  try {
+    const code = await sock.requestPairingCode(req.body.number)
+    res.json({ code })
+  } catch {
+    res.json({ error: "failed" })
+  }
+})
 
-app.use("/pair", pairRouter);
-app.use("/qr", qrRouter);
+app.get("/qr", (req, res) => {
+  res.json({ qr: latestQR })
+})
 
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-});
-
-export default app;
-
+app.listen(3000, () => console.log("🚀 VIMA MD running"))
